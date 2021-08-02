@@ -1,0 +1,265 @@
+---
+title: "Capstone Project"
+author: "Reginald Mordi"
+date: "8/2/2021"
+output: word_document
+---
+A bike-sharing system is a service in which bikes are made available for shared use to individuals on a short-term basis 
+i.e., one day or more for a price, and can also be free in some cases.
+Many bike share systems allow people to borrow a bike from a dock which is usually computer-controlled where the user enters the payment information, and the system unlocks the bike.
+This bike can then be returned to another dock belonging to the same system. I decided to choose bike share for my project based on my experience during my vacation time in South Caroline.
+My objective is to combine historical usage patterns with weather data to forecast bike rental demand, and the goal is to predict the total count of bikes rented during each hour covered by the test set, using only information available prior to the rental period.
+I would be using my dataset for (https://archive.ics.uci.edu/ml/datasets/Apartment+for+rent+classified) 
+Reading the csv files
+```{r}
+library(dplyr)
+library(readr)
+library(lubridate)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r echo=FALSE}
+# set working directory locally
+
+bike_share_train <- read.csv("C:/Users/REGINALD E MORDI/Desktop/Bikeshare/day.csv", header=T)
+
+# read from working directory
+hour <- read.csv("C:/Users/REGINALD E MORDI/Desktop/Bikeshare/hour.csv", header=T)
+
+# reviewing data
+str(hour)
+colnames(hour)
+
+#renaming variables and trimming unnecessary or redundant variables, and good columns would be kept.
+
+hour <- hour %>% rename(hour = hr, month = mnth, year = yr, weather = weathersit, count = cnt)
+goodcolumns = c("dteday","season","year","month","hour","holiday","weekday","workingday", "weather","atemp","count")
+
+hour <- hour[,goodcolumns]  # dump instant, temp,hum,windspeed,casual, and registered columns
+hour$day <- day(hour$dteday)
+bike_share <- hour
+
+# Now I will convert integer to factor on bike_share -  
+
+bike_share$season <- as.factor(bike_share$season)
+bike_share$holiday <- as.factor(bike_share$holiday)
+bike_share$workingday <- as.factor(bike_share$workingday)
+bike_share$weather <- as.factor(bike_share$weather)
+bike_share$weekday <- as.factor(bike_share$weekday)
+
+
+# Removing datetime field 
+#bike_share$dteday <- NULL
+colnames(bike_share)
+
+# create test and training sets for hour data
+set.seed(4666)
+dt = sort(sample(nrow(bike_share), nrow(bike_share)*.5))  # create index of length 'day' with 70% true
+bike_share_train <-bike_share[dt,]
+bike_share_test <-bike_share[-dt,]
+
+## The finished script results would be saved for future
+
+remove(bike_share)
+bikesharetest <- bike_share_test$dteday
+bike_share_test$dteday <- NULL
+bike_share_train$dteday <- NULL
+
+
+#Exploratory Data Analysis
+
+library(sqldf)
+library(ggplot2)
+# Get the average count of bikes rent by season, hour
+season_summary_by_hour <- sqldf('select season, hour, avg(count) as count from bike_share_train group by season, hour')
+
+# From this plot, you will see that there are more rentals in morning from 7-9th hour,and evening from 16-19th hour. 
+# People rent bikes more in Fall, and less in Spring. Either way some will still need a means of transportation.
+
+###CORRECTION!!! readme.txt is wrong. code is not 1,2,3,4 for spring,summer,fall,winter
+####  1- winter,  2 - spring, 3 - summer,  4 = fall.... check month against season!!!
+
+p1<-ggplot(bike_share_train, aes(x=hour, y=count, color=season))+
+  geom_point(data = season_summary_by_hour, aes(group = season))+
+  geom_line(data = season_summary_by_hour, aes(group = season))+
+  ggtitle("Bikes Rent By Season")+ theme_minimal()+
+  scale_colour_hue('Season',breaks = levels(bike_share_train$season))
+p1
+# Get the average count of bikes rent by weather, hour
+weather_summary_by_hour <- sqldf('select weather, hour, avg(count) as count from bike_share_train group by weather, hour')
+
+# From this plot it shows, 
+# People rent bikes more when weather is good
+# We see less bike rental only at 18th hour, when weather is very bad
+
+p2<-ggplot(bike_share_train, aes(x=hour, y=count, color=weather))+
+  geom_point(data = weather_summary_by_hour, aes(group = weather))+
+  geom_line(data = weather_summary_by_hour, aes(group = weather))+
+  ggtitle("Bikes Rent By Weather")+ scale_colour_hue('Weather',breaks = levels(bike_share_train$weather))
+p2
+
+# Get the average count of bikes rent by day of week, hour
+day_summary_by_hour <- sqldf('select weekday, hour, avg(count) as count from bike_share_train group by weekday, hour')
+
+# From this plot it shows, 
+# There are more bikes rent on weekdays during morning and evening because people travel more to work from Monday to Friday
+# There are more bikes rent on weekends during daytime only and less at night.
+
+p3<-ggplot(bike_share_train, aes(x=hour, y=count, color=weekday))+
+  geom_point(data = day_summary_by_hour, aes(group = weekday))+
+  geom_line(data = day_summary_by_hour, aes(group = weekday))+
+  ggtitle("Bikes Rent By Weekday")+ scale_colour_hue('Weekday',breaks = levels(bike_share_train$weekday))
+p3
+
+
+# Now I will splitting the Train dataset
+library(caTools)
+
+set.seed(4666)
+#removing data not suitable for regression 
+bike_share_train$year=NULL
+bike_share_train$day=NULL
+bike_share_test$year=NULL
+bike_share_test$day=NULL
+
+# To correct for distribution problems, I will re-code the weather
+
+weather <- as.numeric(bike_share_test$weather)
+weather[weather==4] <- 3
+weather <- factor(weather)
+bike_share_test$weather <- weather
+
+weather <- as.numeric(bike_share_train$weather)
+weather[weather==4] <- 3
+weather <- factor(weather)
+bike_share_train$weather <- weather
+
+split <- sample.split(bike_share_train$count, SplitRatio = 0.75)
+training_set <- subset(bike_share_train, split == TRUE)
+validation_set <- subset(bike_share_train, split == FALSE)
+
+# Applying Linear Regression model ( note: weather re-coded to 3 levels for fit)
+
+lmBikeRent <- lm(count~., data = training_set)
+summary(lmBikeRent)
+
+# dropping out weekdays as it does not seem important or is masked by workday variable
+
+lmBikeRentreduced <- lm(count~season+month+hour+holiday+workingday+weather+atemp, data=training_set)
+summary(lmBikeRentreduced)
+ 
+# Residual Plots
+# Change the panel layout to 2 x 2 if margins will fit
+# par(mfrow = c(2, 2))
+# Diagnostic Plots
+# Residuals vs Fitted: This plot shows if residuals have non-linear patterns.If you find equally spread residuals around a horizontal line without distinct patterns, that is a good indication you don't have non-linear relationships. 
+# Normal Q-Q: This plot shows if residuals are normally distributed.Do residuals follow a straight line well or do they deviate severely? It's good if residuals are lined well on the straight dashed line.
+# Scale-Location: It's also called Spread-Location plot. This plot shows if residuals are spread equally along the ranges of predictors. This is how you can check the assumption of equal variance (homoscedasticity). It's good if you see a horizontal line with equally (randomly) spread points.
+# Residuals vs Leverage: This plot helps us to find influential cases(outliers) if any. Check if any points fall outside of a dashed line, Cook's distance(meaning they have high Cook's distance score).Those outside points are influential to the regression results.The regression results will be altered if we exclude those cases.
+# From plots, it shows there is a pattern at one location as highlighted in plots with green color.
+plot(lmBikeRent)
+
+# Stepwise Model Selection
+# Performing stepwise model selection by AIC with both directions(Forward, Backward)
+
+library(MASS)
+library(car)
+lmBikeRentAIC<-stepAIC(lmBikeRent, direction="both")
+# lmBikeRentVIF<-vif(lmBikeRent)
+summary(lmBikeRentAIC)
+
+# Prediction on Validation set
+# Apply prediction on validation set
+lm_predict_validation <- predict(lmBikeRentAIC, newdata = validation_set)
+
+# Computing the root-mean-square error value between actual and predicted
+
+library(Metrics)
+validation_rmse<-rmse(validation_set$count,lm_predict_validation)
+print("root-mean-square error between actual and predicted")
+print(validation_rmse)
+
+# Checking the summary of predicted count values
+cat("\n")
+print("summary of predicted count values")
+summary(lm_predict_validation)
+
+# summary of actual count values
+print("summary of actual count values")
+summary(validation_set$count)
+
+# From the summary above, we can see that negative values of predicted count.
+# We do not want negative values as forecast for bike count. Replace all negative numbers with 1 
+
+Output2Mod <- lm_predict_validation
+Output2Mod[lm_predict_validation<=0] <-1
+
+# Checking again the summary of predicted count values
+
+print("summary of predicted count values after replaced the negative values")
+summary(Output2Mod)
+
+# As we replaced the negative values, the rmse value got reduced
+
+print("root-mean-square error value after replaced the negative values")
+print(rmse(validation_set$count,Output2Mod))
+
+cat("\n")
+
+#If we want to penalize under-prediction of demand, rmsle might be a better metric
+
+validaion_rmsle<-rmsle(validation_set$count,Output2Mod)
+print("root-mean-square-log error value after replaced the negative values")
+print(validaion_rmsle)
+
+#Log Transformation
+# Since we got negative predicted values, let us do log transformation and run regression model again
+
+lmBikeRentLog <- lm(log(count)~., data = training_set)
+
+# Now performs stepwise model selection on log model
+
+lmBikeRentLogAIC <- stepAIC(lmBikeRentLog, direction="both")
+
+lm_predict_validation_log <- predict(lmBikeRentLogAIC,newdata=validation_set)
+
+# As the predicted values are in log format, use exponential(exp) to convert from log to non-log values
+lm_predict_validation_nonlog <- exp(lm_predict_validation_log)
+
+# Let us check the summary of predicted count values, it shows there are no negative values
+
+print("summary of predicted count values after log transformation")
+summary(lm_predict_validation_nonlog)
+
+# Check rmsle value again, it got reduced
+validaion_nonlog_rmsle<-rmsle(validation_set$count,lm_predict_validation_nonlog)
+print("root-mean-square-log error value after log transformation")
+print(validaion_nonlog_rmsle)
+
+#Residual vs Fitted plot
+# Let's check the Residual vs Fitted plot
+# It shows some points forms a straight lines
+# If you select bottom straight line points using "identify", you will find that the bike rent count is 1
+# and next straight line points will have bike rent count of 2. 
+
+plot(lmBikeRentLog$fitted.values, lmBikeRentLog$residuals)
+
+# Run model on test data
+
+lm_predict_test_log <- predict(lmBikeRentLogAIC,newdata=bike_share_test)
+
+# As the predicted values are in log format, I used exponential(exp) to convert from log to non-log values
+
+lm_predict_test_nonlog <- exp(lm_predict_test_log)
+
+final_df <- cbind(as.data.frame(lm_predict_test_nonlog), bikesharetest)
+colnames(final_df) <- c("count", "datetime")
+final_df
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
