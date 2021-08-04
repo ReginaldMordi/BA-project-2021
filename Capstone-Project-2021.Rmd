@@ -1,0 +1,362 @@
+---
+title: "Capstone Project"
+author: "Reginald Mordi"
+date: "8/2/2021"
+output: word_document
+---
+A bike-sharing system is a service in which bikes are made available for shared use to individuals on a short-term basis 
+i.e., one day or more for a price, and can also be free in some cases.
+Many bike share systems allow people to borrow a bike from a dock which is usually computer-controlled where the user enters the payment information, and the system unlocks the bike.
+This bike can then be returned to another dock belonging to the same system. I decided to choose bike share for my project based on my experience during my vacation time in South Caroline.
+My objective is to combine historical usage patterns with weather data to forecast bike rental demand, and the goal is to predict the total count of bikes rented during each hour covered by the test set, using only information available prior to the rental period.
+I would be using my dataset for (https://archive.ics.uci.edu/ml/datasets/Apartment+for+rent+classified) 
+Reading the csv files
+```{r}
+library(dplyr)
+library(tidyverse)
+library(broom)
+library(caTools)
+library(car)  
+library(ggplot2)
+```
+
+## Linear regression model
+
+```{r echo=FALSE}
+# Read in datafiles
+Data_day = read.csv("C://Users/REGINALD E MORDI/Desktop/Bikeshare/day.csv", sep = ",", header = TRUE)
+Data_hour = read.csv("C://Users/REGINALD E MORDI/Desktop/Bikeshare/day.csv", sep = ",", header = TRUE)
+#No missing values
+
+
+#Intiial Visualization of the Data
+ggplot(data = Data_day) + 
+  geom_point(aes(x = temp, y = cnt))
+ggplot(data = Data_day) + 
+  geom_point(aes(x = hum, y = cnt))
+ggplot(data = Data_day) + 
+  geom_point(aes(x = windspeed, y = cnt))
+ggplot(data = Data_day) + 
+  geom_point(aes(x = atemp, y = cnt))
+
+
+
+#DOuble check that data day is from data hour
+aggregate(x = Data_day[, 10], list(Data_day$dteday), mean)
+
+
+#Basic stats on outcome
+summary(Data_day$cnt)
+sd(Data_day$cnt)
+
+#Data_Day is an aggregate of the Data_hour data
+
+Data_hour %>% 
+  group_by(dteday) %>%
+  summarise(avg= mean(temp), sd = sd(temp))
+
+
+
+
+#Can do Regression on Data_day or The mixed model for Data_hour  -- opt for the Regression and then Mixed Model -- compare results
+summary(Data_day)
+cor(Data_day[,c(10:13, 16)])
+
+
+#Splitting Data into Training and Test Data sets
+
+set.seed(12)
+
+# Change to 80% 
+split = sample.split(Data_day, SplitRatio = .8)
+
+TrainingData = subset(Data_day, split == TRUE)
+TestData = subset(Data_day, split == FALSE)
+
+
+
+model <- lm(formula = cnt ~ temp + atemp + hum + windspeed, data = TrainingData)
+         
+
+vif(model)
+summary(model)
+
+
+#High Degree of Multicollinearity exist between temp and atemp -- both are temperatures, however atemp is the feel like temperature, a more complex model can be built to deal with the high degree of correlation that exist between the two variables
+#Alternatively, to start building a simple model and working up in complexity, we will drop the feel like variable aka atemp
+
+model.temp <- lm(formula = cnt ~ temp + hum + windspeed, data = TrainingData)
+vif(model.temp)  #VIF issue addressed
+summary(model.temp)
+
+
+
+#Model Performance
+#1.Residual Standard Error(RSE) = 1443 on 544 degrees of freedom.
+#Corresponds to the prediction error
+#average difference between the observed values and the predicted values by the model
+#Prediction Error rate: 1443/4510.67 = .3199 or ~32% 
+
+
+
+
+#2. Rsquared and Adjusted Rsquared
+#Proportion of variation in the outcome variable that can be explained by the model predictor variables
+#Naturally increases as the number of predictor variables increases
+#Adjusted R sqaured corrects for number of predictors
+#Adjusted R-Squared = 0.4535
+#Interpretation 45% of vairance in data is explained by the Model
+
+
+
+#3. F-Statistic
+#Overall significance of the model
+#Default null is no predictors are significant
+#Alt is at least one
+
+
+
+
+
+
+
+
+
+
+
+#Assumptions to be examined:
+# 1. Linearity of the data. The relationship between the predictor (x) and the outcome (y) is assumed to be linear.
+# 2. Normality of residuals. The residual errors are assumed to be normally distributed.
+# 3. Homogeneity of residuals variance. The residuals are assumed to have a constant variance (homoscedasticity)
+# 4. Independence of residuals error terms.
+# model.diag.metrics <- augment(model.temp)  #<--- double check results -- plot is off
+
+par(mfrow = c(2, 2))
+plot(model.temp)
+
+
+
+
+
+
+#Plost show presence of outliers that must be addressed; Looking at plots from top, left to right:
+
+#1. Assumption 1:
+#Residuals vs Fitted: -- Ideally the Red line would stay along 0 -- for any given predicted value the distance from true value is not far from 0
+#Residuals vs Fitted. Used to check the linear relationship assumptions. A
+# horizontal line, without distinct patterns is an indication for a linear relationship, what is good.
+
+#2. Assumption 2
+#Normal Q-Q. Used to examine whether the residuals are normally distributed. Itâs good if residuals points follow the straight dashed line.
+#You want the errors or unexplained variance to be normally distributed
+
+#3. Assumption 3
+# Scale-Location (or Spread-Location). Used to check the homogeneity of variance of the residuals (homoscedasticity). 
+# Horizontal line with equally spread points is a good indication of homoscedasticity. This is not the case in our example, where we have a heteroscedasticity problem.
+
+#4.Assumption 4
+# Residuals vs Leverage. Used to identify influential cases, that is extreme values that 
+# might influence the regression results when included or excluded from the analysis. This plot will be described further in the next sections.
+
+
+#Examination of Influential Values
+# An influential value is a value, which inclusion or exclusion can alter the results of the 
+# regression analysis. Such a value is associated with a large residual -- note not all outliers are necessarily influential. 
+#Cookes distance is the metric used to determine what is an influential value
+#Is it considered influential if the metric exceeds: 4/(n - p - 1) -- n = number of observations and p is the number of predictor variables
+#Threshold = 4/(548 - 3 -1) = .00735
+#The plot will label by default the top 3 influential values. -- we can add more my changing the default number
+par(mfrow = c(2, 2))
+plot(model.temp, 4)
+plot(model.temp, 5)
+plot(model.temp, 4, id.n = 10)
+plot(model.temp, 5, id.n = 10)
+
+
+#Based on the above, we should seek to improve the model one of two ways while avoiding overfitting
+#The first would be to include more predictors and possible interactions
+#The second is to remove influential values
+
+
+#Approach 2 Example
+#The top three outliers are rows: 69, 203, 638 let us remove them and review
+
+#Removal of influential
+TrainingData.clean1 <- TrainingData[-c(23),]  #Not working for some reason
+
+TrainingData[239,]
+
+x <- subset(TrainingData, instant != c(93, 271,319))
+
+model.temp.clean1 <- lm(formula = cnt ~ temp + hum + windspeed, data = x)
+summary(model.temp.clean1)
+par(mfrow = c(2, 2))
+plot(model.temp.clean1)
+
+  
+#Resources
+
+#Misc
+#Dataset Source: https://archive.ics.uci.edu/ml/datasets/bike+sharing+dataset
+#Aggregate Example: https://stackoverflow.com/questions/21982987/mean-per-group-in-a-data-frame
+
+#Linear Regression
+#VIF: https://www.statisticshowto.com/variance-inflation-factor/
+#Goodness of Fit: http://www.sthda.com/english/articles/40-regression-analysis/165-linear-regression-essentials-in-r/#multiple-linear-regression
+#Diagnostic Plots: http://www.sthda.com/english/articles/39-regression-model-diagnostics/161-linear-regression-assumptions-and-diagnostics-in-r-essentials/
+```
+## Random forest approach
+```{r}
+#Below is the random forest approach 
+
+
+#Random Forest Approach
+
+
+
+
+#Look into if random forest is an option -- thought of as a logistic regression -- might not work in this situation unless binning of outcome
+#For Random Forest -- try binning the counts into discreet categories
+
+
+# Load the library
+library(randomForest)
+library(rsample)
+set.seed(12309)
+
+model.Forest.temp <- randomForest(cnt ~ temp + hum + windspeed, data = TrainingData)
+
+print(model.Forest.temp)
+plot(model.Forest.temp)
+
+
+model.Forest.all <- randomForest(
+  formula = cnt ~ .,
+  data = TrainingData)
+print(model.Forest.all)
+#98.22% of variance is explained by the model (concern with overfitting)
+#500 trees is defaul; more trees means more models to average
+#During each split a subset of predictors are used to generate the model; in this case we are using the defualt
+#Default number of trees is determined by features/3 (15/3)
+#Mean of Squared residuals = 67841.89; 
+plot(model.Forest.all)
+
+
+
+
+
+model.Forest.all.ER <- model.Forest.all$mse  #Metric of model perofrmance; lower value is better goal is to minimize without overfitting
+which.min(model.Forest.all.ER) #Yield value of 496 -- number of trees with the lowest MSE 
+sqrt(model.Forest.all.ER[which.min(model.Forest.all.ER)]) #Yields 257.826
+
+#So 496 trees provide an average count of 257.826 of bikes
+
+
+#Validation Set
+set.seed(1458)
+
+#For Splitting of TrainingData
+valid_split <- initial_split(TrainingData, 0.8)
+
+#Generating of two new data sets from TrainingDat
+TrainingData.V2 <- analysis(valid_split)
+ValidationData <- assessment(valid_split)
+
+#Separating out the predictor names from the outcome
+x_test <- ValidationData[setdiff(names(ValidationData), "cnt")]
+y_test <- ValidationData$cnt
+
+#Generate new model on validation set
+model.Forest.all.Validation <- randomForest(cnt ~ ., data = TrainingData.V2, x_test, y_test)
+
+#EXtract OOb (Out of Bag) and Validation Errors
+oob <- sqrt(model.Forest.all.Validation$mse) #Yields RMSE -- root mean squared residuals
+validation <- sqrt(model.Forest.all.Validation$test$mse)
+
+# compare error rates
+#OOB ERROR -- REMMEBER THAT DURINGH THE BOOTSTRAP ONLY A PORTION OF THE DATA IS USED, SO TEH OTHER PORTIONC AN BE USED TO VALIDATE EACH MODEL GENERATED -- TAHT SI WHAT IS BEING DONE HERE AND THEN PLOTTED WITH THE ACTUAL MODEL
+
+tibble::tibble(
+  `Out of Bag Error` = oob,
+  `Test error` = validation,
+  ntrees = 1:model.Forest.all.Validation$ntree
+) %>%
+  gather(Metric, RMSE, -ntrees) %>%
+  ggplot(aes(ntrees, RMSE, color = Metric)) +
+  geom_line() +
+  scale_y_continuous(labels = scales::number) +
+  xlab("Number of trees")
+
+#THE large difference between the two lines indicates a problem with overfitting -- This means we should try and tune the model
+features <- setdiff(names(ValidationData), "cnt")
+
+set.seed(132045)
+m2 <- randomForest::tuneRF(
+  x = TrainingData[features],
+  y = TrainingData$cnt,
+  ntreeTry = 500,
+  mtryStart = 5,
+  stepFactor = 1.5,
+  improve = .01,
+  trace = FALSE
+
+)
+
+model.Forest.all.Validation.mtry <- randomForest(cnt ~ ., data = TrainingData.V2, x_test, y_test, mtry = 15)
+
+print(model.Forest.all.Validation.mtry)
+
+
+
+
+
+
+# #Some definition and EXPLANATIONS:
+# #OOB -- Out of Bag -- What is it?
+# ---
+#   To answer we will examine what is a random forest. A random forest is a combination of two other methods:
+#   * Regression trees
+#   * Bagging
+# 
+# Regression Trees
+# "Basic regression trees partition a data set into smaller groups and then fit a simple model (constant)
+# for each subgroup." --> meaning, a model is build after grouping similar observations; by doing so modelling becomes a simpler problem
+# 
+# Problem is lack of stability and poor prediction  (less predictors may translate to less explanation or capturing of unique cases)
+# 
+# How is data partitioning done? 
+#   successive binary patitions; the constant to predict is based on the average response values for all observations that fall in that subgroup
+# 
+# The partitions and genertaed in a top-down, greedy fahsion -- in other words correction to top level splits are not performed
+# So how was partitions made? How do we decide what predictor to split and how to split it?
+#   The goal is to find the predictorsand split values that generate two partitioons with the lowest sums of squares error
+# 
+# Pruning (cutting higher up) helps improve it amongs other tuning paramters
+#          repeat
+#   
+#   
+#   
+#   
+# Bagging
+# 
+# USed to remove problem of high variance from a simngle tree model. This is the building of multiple trees and averaging them
+# SEE REFERENCE FOR SPEICFIC STEPS
+# 
+# 
+# RANDOM FOREST IMPROVES ON ABOVE BY ADDRESSING HIGH CORRLEATION BETWEEN MULTIPLE MODELS PROBLEMS INTROIDUCED BY BAGGING
+# ACCOMPLISHED BY BOOTSTRAP -- EACH TREE IS GROW NO A BOOTSTRAP RESAMPLED DATA Seatbelts -- AND SPLIT-VARIABLE RNADOMIZATION -- 
+#   NOT ALL VARIABLES ARE USED TO BUILD THE MODEL, NOT ALL USED FOR SPLITS A TYPICAL VALUE IS P/3 (5 FOR US). WHEN M = P THEN YOU ARE BVAGGGING
+
+  
+  
+
+
+#Run Some summary stats to find the best bins and define them. (i.e. high use, middle use, and low)  <- alt third approach
+
+
+#Random Forest Regression 
+#Random Forest Tutorial: https://www.geeksforgeeks.org/random-forest-approach-for-regression-in-r-programming/
+#https://uc-r.github.io/random_forests
+#http://uc-r.github.io/regression_trees
+
+```
